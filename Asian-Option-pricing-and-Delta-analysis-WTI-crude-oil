@@ -1,0 +1,234 @@
+%% ratecurve Object
+%  
+Settle = datetime(2021,01,01);  %
+Maturity = datetime(2027,01,01); % 
+Rate = 0.0361;            % 10 yr treasury rate
+Compounding = -1;   % default
+Basis = 1;        % Day count basis, 30/360           
+ZeroCurve = ratecurve('zero',Settle,Maturity,Rate,'Compounding',Compounding,'Basis', Basis)
+
+%% BlackScholes Model 
+% Use finmodel to create a BlackScholes model object.
+Volatility = .4566;   % source: barchart, WTI crude oil implied volatility
+BSModel = finmodel("BlackScholes",'Volatility',Volatility)
+
+%% Asian Instrument 
+% Use fininstrument to create two Asian instrument objects, 
+    % one using an arithmetic average and the other using a geometric average.
+
+ExerciseDates = datetime(2023,04,17); % expiration on 04/17/23, source: barchart
+Strike = 74;                       % call strike - WTI crude oil, source: barchart
+OptionType = 'call';
+AverageType = 'geometric';
+
+AsianOptArith = fininstrument("Asian",'ExerciseDate',ExerciseDates,'Strike',Strike,...
+                              'OptionType',OptionType,'Name',"CallAsianArith")
+
+AsianOptGeo = fininstrument("Asian",'ExerciseDate',ExerciseDates,'Strike',Strike,...
+                            'OptionType',OptionType,'AverageType', AverageType,'Name',"CallAsianGeo")
+
+%% AssetTree and MonteCarlo Pricer
+% Use finpricer to create BlackScholes and MonteCarlo pricer objects and use the ratecurve object for the 'DiscountCurve' name-value pair argument
+
+SpotPrice = 73.94; % source: investing.com   - WTI crude oil spot price - 13/12
+InpSensitivity = "delta";
+
+% AssetTree Pricer
+% Define the number of levels of the tree
+NumPeriods = 50;       %
+CRRPricer = finpricer("AssetTree",'DiscountCurve',ZeroCurve,'Model',BSModel, 'SpotPrice',SpotPrice, ...
+                      'PricingMethod',"CoxRossRubinstein",'NumPeriods', NumPeriods,...
+                      'Maturity', ExerciseDates);
+
+% AssetMonteCarlo Pricer
+% Define the number of simulation trials
+NumTrials = 2000;     
+SimDates =[Settle:days(2):ExerciseDates ExerciseDates];
+
+MCPricer = finpricer("AssetMonteCarlo", 'Model', BSModel, 'SpotPrice', SpotPrice, 'DiscountCurve', ZeroCurve,...
+                     'SimulationDates',  SimDates, 'NumTrials', NumTrials);
+
+%% Price of the Arithmetic and Geometric Asian Options Using the two Different Pricers
+%
+
+% Cox-Ross-Rubinstein
+[CRRArithPrice, CRRArithoutPR] = price(CRRPricer, AsianOptArith, InpSensitivity);
+
+[CRRGeoPrice, CRRGeooutPR] = price(CRRPricer, AsianOptGeo, InpSensitivity);
+
+% Monte Carlo
+[MCArithPrice, MCArithoutPR] = price(MCPricer, AsianOptArith, InpSensitivity);
+
+[MCGeoPrice, MCGeooutPR] = price(MCPricer, AsianOptGeo, InpSensitivity);
+
+
+%% Compare Asian Option Prices
+% use the function display___   (local function)
+
+displayPricesAsianCallOption(CRRArithPrice,CRRGeoPrice,MCArithPrice,MCGeoPrice)
+
+%Comparison of Asian prices:
+
+%Arithmetic Asian
+%Cox-Ross-Rubinstein:      12.480447
+%Monte Carlo:              12.198647
+
+%Geometric Asian
+%Cox-Ross-Rubinstein:      10.758678
+%Monte Carlo:              10.756951
+
+ 
+%The arithmetic average Asian options are more expensive than their
+%geometric average counterparts.
+
+%% Compare Asian and Vanilla Options 
+% Asian options tend to be less expensive than comparable vanilla calls and puts. 
+% -> volatility in the average value of an underlier tends to be lower than the volatility of the value of the underlier itself. 
+
+%% Vanilla Instrument Object
+% fininstrument -> create a Vanilla instrument object with same Maturity and Strike as the two Asian options
+
+EuropeanCallOption = fininstrument("Vanilla",'ExerciseDate',ExerciseDates,'Strike',Strike,...
+                                   'OptionType',OptionType,'Name',"CallVanilla")
+
+%% Analytic Pricer 
+% finpricer -> create a BlackScholes pricer object and use the ratecurve object for the 'DiscountCurve' argument.
+
+BLSPricer = finpricer('Analytic', 'Model', BSModel, 'SpotPrice', SpotPrice, 'DiscountCurve', ZeroCurve)
+
+% Compute price and delta sensitivity.
+[BLSPrice, BLSoutPR] = price(BLSPricer, EuropeanCallOption, InpSensitivity);
+
+%% Compare Prices for Asian and Vanilla Options
+% Compare option prices using the display___ (local function)
+
+displayVanillaAsianComparison('Prices', BLSPrice, CRRArithPrice,MCArithPrice) 
+
+%Comparison of Vanilla and Asian Option Prices:
+
+%Vanilla BLS:             22.255385
+%Asian Cox-Rubeinstain:   12.480447
+%Asian MonteCarlo:        12.198647
+% Both the geometric and arithmetic Asian option prices are lower than their vanilla counterparts
+
+%% Compare Delta Sensitivity for Asian and Vanilla Options
+% Delta value measures the option price sensitivity to changes in the price of the underlying asset. 
+% As the underlier changes, the proportions of the instruments in the portfolio might need to be adjusted 
+% to keep the sensitivities in a desirable range.
+
+displayVanillaAsianComparison('Delta', BLSoutPR.Results.Delta, CRRArithoutPR.Results.Delta,MCArithoutPR.Results.Delta)
+
+% Comparison of Vanilla and Asian Option Delta:
+
+%Vanilla BLS:             0.678820
+%Asian Cox-Rubeinstain:   0.577423
+%Asian MonteCarlo:        0.567504
+
+
+% Geometric Asian delta value is lower than the delta value for the arithmetic Asian option.
+
+%% Analyze Effect of Variations of Underlying Asset on Option Prices
+% examine the effect of changes of underlying asset prices. 
+
+OilPrices = (50:3:120)';   %
+PriceBLS = nan(size(OilPrices));
+PriceCRR_arith = PriceBLS;
+PriceCRR_geo = PriceBLS;
+PriceMC_arith = PriceBLS;
+PriceMC_geo = PriceBLS;
+DeltaBLS = PriceBLS;
+DeltaCRR_arith = PriceBLS;
+DeltaCRR_geo = PriceBLS;
+InpSensitivity = "delta";
+idx = 1;
+NumPeriods = 50;
+NumTrials = 2000;     
+SimDates =[Settle:days(2):ExerciseDates ExerciseDates];
+for AssetPrice = OilPrices'       
+
+    PricerBLS = finpricer('Analytic', 'Model', BSModel, 'SpotPrice', AssetPrice,...
+                          'DiscountCurve', ZeroCurve);
+    [PriceBLS(idx), outPRBLS] = price(PricerBLS, EuropeanCallOption, InpSensitivity);
+    DeltaBLS(idx) = outPRBLS.Results.Delta;
+
+    PricerCRR = finpricer("AssetTree",'DiscountCurve',ZeroCurve,'Model',BSModel, 'SpotPrice',AssetPrice, ...
+                      'PricingMethod',"CoxRossRubinstein",'NumPeriods', NumPeriods,...
+                      'Maturity', ExerciseDates);
+    [PriceCRR_geo(idx), outPRCRR1] = price(PricerCRR, AsianOptGeo, InpSensitivity);
+    DeltaCRR1(idx) = outPRCRR1.Results.Delta;
+
+    [PriceCRR_arith(idx), outPRCRR2] = price(PricerCRR, AsianOptArith, InpSensitivity);
+    DeltaCRR2(idx) = outPRCRR2.Results.Delta;
+
+    PricerMC = finpricer("AssetMonteCarlo", 'Model', BSModel, 'SpotPrice', AssetPrice, 'DiscountCurve', ZeroCurve,...
+                     'SimulationDates',  SimDates, 'NumTrials', NumTrials);
+     [PriceMC_geo(idx), outPRMC1] = price(PricerMC, AsianOptGeo, InpSensitivity);
+    DeltaMC1(idx) = outPRMC1.Results.Delta;
+
+    [PriceMC_arith(idx), outPRMC2] = price(PricerMC, AsianOptArith, InpSensitivity);
+    DeltaMC2(idx) = outPRMC2.Results.Delta;
+    idx = idx+1;
+end
+
+
+% Effect of variations in the price of the underlying asset on the vanilla and Asian option prices.
+figure('menubar', 'none', 'numbertitle', 'off')
+plot(OilPrices, [PriceBLS PriceCRR_geo PriceCRR_arith PriceMC_geo PriceMC_arith]);
+xlabel 'Spot Price ($)'
+ylabel 'Option Price ($)'
+title 'Asian and Vanilla Option Price Comparison'
+legend('Vanilla', 'CRR Geometric Asian','CRR Arithmetic Asian','MC Geometric Asian','MC Arithmetic Asian', 'location','northwest');
+
+
+% The price of the Asian options is cheaper than the price of the vanilla option.
+% In addition, the MC estimate's prices seem more volatiles compared to CRR
+% counterparts
+
+%% Analyze Effect of Variations of the Underlying Asset on the Options Delta
+
+% transpose the vectors 
+DeltaCRR1_flip = DeltaCRR1.';
+DeltaCRR2_flip = DeltaCRR2.';
+DeltaMC1_flip = DeltaMC1.';
+DeltaMC2_flip = DeltaMC2.';
+
+
+figure('menubar', 'none', 'numbertitle', 'off')
+plot(OilPrices, [DeltaBLS DeltaCRR1_flip DeltaCRR2_flip DeltaMC1_flip DeltaMC2_flip]);
+xlabel 'Spot Price ($)'
+ylabel 'Call Delta'
+title 'Asian and Vanilla Option Delta Comparison (Strike Price = $74)'
+legend('Vanilla', 'CRR Geometric Asian', 'CRR Arithmetic Asian','MC Geometric Asian','MC Arithmetic Asian', 'location', 'northwest');
+
+% behavior of the delta value for the Vanilla and Asian options as a function of the underlying price.
+
+% A vanilla or Asian in-the-money ($ > strike) call is more sensitive to price movements than an out-of-the-money ($ < strike). 
+% If the asset price is deep in the money, (it's more likely to be exercised). 
+% For an out-of-the-money the Asian delta value is lower for out-of-the-money options and 
+% higher for in-the-money options compared with the vanilla European.
+
+
+
+
+% source: Mathwork documentation
+%% local functions
+function displayPricesAsianCallOption(CRRArithPrice,CRRGeoPrice,MCArithPrice,MCGeoPrice)
+fprintf('Comparison of Asian prices:\n');
+fprintf('\n');
+fprintf('Arithmetic Asian\n');
+fprintf('Cox-Ross-Rubinstein:      %f\n', CRRArithPrice); 
+fprintf('Monte Carlo:              %f\n', MCArithPrice);
+fprintf('\n');
+fprintf('Geometric Asian\n');
+fprintf('Cox-Ross-Rubinstein:      %f\n', CRRGeoPrice);
+fprintf('Monte Carlo:              %f\n', MCGeoPrice);
+end
+
+%% 
+function displayVanillaAsianComparison(type, BLS, CRR,MC)   % format type 
+fprintf('Comparison of Vanilla and Asian Option %s:\n', type);
+fprintf('\n');
+fprintf('Vanilla BLS:              %f\n', BLS);
+fprintf('Asian Cox-Rubeinstain:        %f\n', CRR);
+fprintf('Asian MonteCarlo:        %f\n', MC);
+end
