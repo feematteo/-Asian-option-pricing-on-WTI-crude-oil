@@ -1,0 +1,44 @@
+% Pricing a simple arithmetic average Asian option using the Monte Carlo simulation method:
+
+% Parameters
+S = 100;           % current price of the underlying asset
+K = 110;           % strike price of the option
+T = 1;             % time to expiration of the option
+r = 0.05;          % risk-free interest rate
+sigma = 0.2;       % volatility of the underlying asset
+N = 50000;         % number of simulation paths
+M = 12;           % number of time steps
+dt = T/M;          % time step size
+
+% Simulate asset prices using the geometric Brownian motion model
+S_path = zeros(N, M+1); % Building storage, each row is a path
+S_path(:, 1) = S;  % i set the starting point in S_0--> open window s_path
+for i = 1:N
+    for j = 1:M
+        S_path(i, j+1) = S_path(i, j) * exp((r - 0.5*sigma^2)*dt + sigma*sqrt(dt)*randn); % Simulation MC
+    end
+end
+
+% Calculate the average price of the asset for each path
+S_avg = mean(S_path, 2);  %if A is a matrix, then mean(A,2) is a column vector containing the mean of each row.
+% I obtain a column vector, each row is the mean price of the asset for
+% each path
+
+% Calculate the payoff CALL of the option
+payoff = max(S_avg - K, 0);
+
+% Calculate the present value of the payoff
+discount_factor = exp(-r*T);
+pv_payoff = payoff * discount_factor;
+
+% Calculate the option price
+option_price = mean(pv_payoff);
+
+
+
+% In this code, I simulate N paths of the underlying asset using the geometric Brownian motion model, with M time steps. 
+% I then calculate the average price of the asset for each path, and use these values to calculate the payoff of the option. 
+% I discount the payoff to present value using the risk-free interest rate and take the average over all paths to obtain 
+% the option price.
+
+% made with Nicolò Amadori
